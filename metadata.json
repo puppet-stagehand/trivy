@@ -1,0 +1,22 @@
+{
+  "name": "souldonetworks-trivy",
+  "version": "0.1.0",
+  "author": "souldonetworks",
+  "summary": "Run Trivy and POST normalized compliance.v1 results to the Puppet Stagehand Console. Reference scanner integration — any scanner that speaks compliance.v1 to the same ingest endpoint is a valid substitute.",
+  "license": "Apache-2.0",
+  "source": "https://github.com/souldonetworks/trivy",
+  "project_page": "https://github.com/souldonetworks/trivy",
+  "issues_url": "https://github.com/souldonetworks/trivy/issues",
+  "dependencies": [],
+  "operatingsystem_support": [
+    { "operatingsystem": "Ubuntu", "operatingsystemrelease": ["20.04", "22.04", "24.04"] },
+    { "operatingsystem": "Debian", "operatingsystemrelease": ["11", "12"] },
+    { "operatingsystem": "RedHat", "operatingsystemrelease": ["8", "9"] },
+    { "operatingsystem": "Rocky", "operatingsystemrelease": ["8", "9"] },
+    { "operatingsystem": "AlmaLinux", "operatingsystemrelease": ["8", "9"] }
+  ],
+  "requirements": [
+    { "name": "puppet", "version_requirement": ">= 8.0.0 < 9.0.0" }
+  ],
+  "tags": ["puppet-core", "console", "compliance", "trivy", "bolt"]
+}

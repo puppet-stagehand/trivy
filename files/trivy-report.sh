@@ -11,7 +11,7 @@
 #   trivy rootfs --scanners vuln --format json -o report.json /
 #   ./trivy-report.sh --report report.json --certname "$(puppet config print certname)" \
 #     | curl -sf -X POST "$CONSOLE/api/v1/compliance/results" \
-#            -H "Authorization: Bearer $(cat /etc/puppetlabs/pcc-ingest.token)" \
+#            -H "Authorization: Bearer $(cat /etc/puppetlabs/psh-ingest.token)" \
 #            -H 'Content-Type: application/json' --data-binary @-
 #
 # Note: a clean scan emits one synthetic "pass" control per target so the node

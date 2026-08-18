@@ -1,5 +1,5 @@
 #!/bin/sh
-# pcm::trivy_scan — run Trivy on a node, normalize to compliance.v1 with the
+# trivy::trivy_scan — run Trivy on a node, normalize to compliance.v1 with the
 # bundled adapter, and POST to the console. Self-contained: the adapter ships
 # with the task via metadata "files" and is resolved through $PT__installdir.
 set -u
@@ -14,7 +14,7 @@ INSTALL="${PT_install:-false}"
 [ -n "$CONSOLE" ] || die "console_url is required"
 
 INSTALLDIR="${PT__installdir:-}"
-ADAPTER="${INSTALLDIR}/pcm/files/trivy-report.sh"
+ADAPTER="${INSTALLDIR}/trivy/files/trivy-report.sh"
 [ -f "$ADAPTER" ] || die "trivy-report adapter not found at $ADAPTER"
 command -v jq >/dev/null 2>&1 || die "jq is required on the target for the trivy adapter"
 

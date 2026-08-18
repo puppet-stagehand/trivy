@@ -1,7 +1,7 @@
 {
   "description": "Scan a node's filesystem with Trivy and POST normalized compliance.v1 results to the console. Self-contained (bundles the trivy-report adapter). Installs Trivy when install=true.",
   "input_method": "environment",
-  "files": ["pcm/files/trivy-report.sh"],
+  "files": ["trivy/files/trivy-report.sh"],
   "parameters": {
     "console_url": {
       "description": "Console base URL to POST results to (server-injected).",
