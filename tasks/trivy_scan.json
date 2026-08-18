@@ -1,0 +1,25 @@
+{
+  "description": "Scan a node's filesystem with Trivy and POST normalized compliance.v1 results to the console. Self-contained (bundles the trivy-report adapter). Installs Trivy when install=true.",
+  "input_method": "environment",
+  "files": ["pcm/files/trivy-report.sh"],
+  "parameters": {
+    "console_url": {
+      "description": "Console base URL to POST results to (server-injected).",
+      "type": "String[1]"
+    },
+    "ingest_token": {
+      "description": "Bearer token for /api/v1/compliance/results (server-injected).",
+      "type": "Optional[String[1]]"
+    },
+    "scan_path": {
+      "description": "Filesystem path to scan (trivy rootfs).",
+      "type": "String[1]",
+      "default": "/"
+    },
+    "install": {
+      "description": "Install Trivy if it is not already present.",
+      "type": "Boolean",
+      "default": false
+    }
+  }
+}
