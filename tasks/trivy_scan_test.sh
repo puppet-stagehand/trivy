@@ -126,40 +126,40 @@ SHIM
 #     checksum-mismatch case is exercised deterministically), otherwise
 #     dummy tarball bytes whose real sha256 will never equal the all-zero
 #     stub checksum. Never makes a real network call.
-cat > "$SHIMDIR/curl" <<'SHIM'
+cat > "$SHIMDIR/curl" <<SHIM
 #!/bin/sh
-printf 'curl %s\n' "$*" >> "$ARGV_LOG"
+printf 'curl %s\n' "\$*" >> "$ARGV_LOG"
 
 is_post=0
 prev=""
-for a in "$@"; do
-  if [ "$prev" = "-X" ] && [ "$a" = "POST" ]; then is_post=1; fi
-  prev="$a"
+for a in "\$@"; do
+  if [ "\$prev" = "-X" ] && [ "\$a" = "POST" ]; then is_post=1; fi
+  prev="\$a"
 done
 
-if [ "$is_post" = "1" ]; then
-  [ "${SHIM_CURL_POST_SUCCEED:-1}" = "1" ] && exit 0
+if [ "\$is_post" = "1" ]; then
+  [ "\${SHIM_CURL_POST_SUCCEED:-1}" = "1" ] && exit 0
   exit 1
 fi
 
-[ "${SHIM_CURL_DOWNLOAD_SUCCEED:-1}" = "1" ] || exit 1
+[ "\${SHIM_CURL_DOWNLOAD_SUCCEED:-1}" = "1" ] || exit 1
 
 out=""
 prev=""
 url=""
-for a in "$@"; do
-  if [ "$prev" = "-o" ]; then out="$a"; fi
-  prev="$a"
-  case "$a" in
-    http*) url="$a" ;;
+for a in "\$@"; do
+  if [ "\$prev" = "-o" ]; then out="\$a"; fi
+  prev="\$a"
+  case "\$a" in
+    http*) url="\$a" ;;
   esac
 done
-case "$url" in
+case "\$url" in
   *checksums.txt)
-    printf '0000000000000000000000000000000000000000000000000000000000000000  trivy_0.72.0_Linux-64bit.tar.gz\n' > "$out"
+    printf '0000000000000000000000000000000000000000000000000000000000000000  trivy_0.72.0_Linux-64bit.tar.gz\n' > "\$out"
     ;;
   *)
-    printf 'dummytrivybinarydata' > "$out"
+    printf 'dummytrivybinarydata' > "\$out"
     ;;
 esac
 exit 0

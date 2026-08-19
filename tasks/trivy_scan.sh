@@ -6,6 +6,18 @@ set -u
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# fail_json REASON
+#
+# Sibling to die() for BUSINESS-LOGIC failures only (a download/checksum/
+# install/scan/adapter/POST step that ran but failed) -- as opposed to
+# die()'s SETUP failures (missing console_url, missing adapter, missing jq,
+# a malformed scan_path). Emits the established
+# {"status": "error", "error": "...", "scanner": "trivy"} embedded-status
+# contract (AUDIT-04, matching install_ansible.sh/discover.sh/patch.sh) on
+# stdout and exits 0, so the console/orchestrator can always parse the
+# outcome instead of an opaque stderr blob and a bare non-zero exit.
+fail_json() { printf '{"status": "error", "error": "%s", "scanner": "trivy"}\n' "$*"; exit 0; }
+
 # TRIVY_SCAN_PUPPET_BIN exists solely so tests can point the certname lookup
 # at a stub puppet binary on a curated PATH instead of the real
 # /opt/puppetlabs/bin/puppet (which may be genuinely installed on the
@@ -17,6 +29,21 @@ CONSOLE="${PT_console_url:-}"
 TOKEN="${PT_ingest_token:-}"
 SCAN_PATH="${PT_scan_path:-/}"
 INSTALL="${PT_install:-false}"
+
+# scan_path becomes the final, unguarded positional argv element in the
+# `trivy rootfs ... "$SCAN_PATH"` invocation below. Shell quoting prevents
+# word-splitting but does NOT prevent a value like "--severity=CRITICAL"
+# from being parsed as a FLAG by trivy's own cobra-based CLI argument
+# parser -- empirically verified against a live trivy v0.70.0 binary during
+# this phase's research session (see 02-RESEARCH.md Pitfall 1). Reject a
+# leading-dash value before it ever reaches trivy's argv. trivy_scan.json's
+# Pattern-typed scan_path rejects this too, but this task must not trust
+# that Bolt is always the caller (same two-layer validation idiom as
+# patch.sh's patch_ids regex). This stays a hard die()/exit 1 input-
+# validation gate (D-05), not embedded-JSON.
+case "$SCAN_PATH" in
+  -*) die "scan_path must not start with '-' (would be misparsed as a trivy flag)" ;;
+esac
 
 [ -n "$CONSOLE" ] || die "console_url is required"
 
@@ -40,24 +67,24 @@ TRIVY_BASE="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VER
 
 if ! command -v trivy >/dev/null 2>&1; then
   if [ "$INSTALL" = "true" ]; then
-    printf '>>> installing trivy %s (checksum-verified)\n' "$TRIVY_VERSION"
+    printf '>>> installing trivy %s (checksum-verified)\n' "$TRIVY_VERSION" >&2
     TMPDIR=$(mktemp -d) || die "mktemp -d failed"
 
     curl -sfL "$TRIVY_BASE/$TRIVY_ASSET" -o "$TMPDIR/$TRIVY_ASSET" \
-      || die "trivy download failed"
+      || fail_json "trivy download failed"
     curl -sfL "$TRIVY_BASE/trivy_${TRIVY_VERSION}_checksums.txt" -o "$TMPDIR/checksums.txt" \
-      || die "trivy checksums.txt download failed"
+      || fail_json "trivy checksums.txt download failed"
 
     EXPECTED=$(grep " $TRIVY_ASSET\$" "$TMPDIR/checksums.txt" | awk '{print $1}')
-    [ -n "$EXPECTED" ] || die "no checksum entry found for $TRIVY_ASSET in checksums.txt"
+    [ -n "$EXPECTED" ] || fail_json "no checksum entry found for $TRIVY_ASSET in checksums.txt"
     ACTUAL=$(sha256sum "$TMPDIR/$TRIVY_ASSET" | awk '{print $1}')
-    [ "$EXPECTED" = "$ACTUAL" ] || die "trivy checksum mismatch: expected $EXPECTED got $ACTUAL"
+    [ "$EXPECTED" = "$ACTUAL" ] || fail_json "trivy checksum mismatch: expected $EXPECTED got $ACTUAL"
 
-    tar -xzf "$TMPDIR/$TRIVY_ASSET" -C "$TMPDIR" trivy || die "trivy tarball extraction failed"
-    install -m 0755 "$TMPDIR/trivy" /usr/local/bin/trivy || die "trivy install failed"
+    tar -xzf "$TMPDIR/$TRIVY_ASSET" -C "$TMPDIR" trivy || fail_json "trivy tarball extraction failed"
+    install -m 0755 "$TMPDIR/trivy" /usr/local/bin/trivy || fail_json "trivy install failed"
     rm -rf "$TMPDIR"
   else
-    die "trivy not installed (pass install=true to auto-install)"
+    fail_json "trivy not installed (pass install=true to auto-install)"
   fi
 fi
 
@@ -65,20 +92,20 @@ CERT=$("$PUPPET_BIN" config print certname 2>/dev/null || hostname -f 2>/dev/nul
 REPORT=$(mktemp) || die "mktemp failed"
 trap 'rm -f "$REPORT"' EXIT
 
-printf '>>> trivy rootfs --scanners vuln %s\n' "$SCAN_PATH"
+printf '>>> trivy rootfs --scanners vuln %s\n' "$SCAN_PATH" >&2
 trivy rootfs --scanners vuln --format json -o "$REPORT" "$SCAN_PATH" 2>/dev/null || true
-[ -s "$REPORT" ] || die "trivy produced no report"
+[ -s "$REPORT" ] || fail_json "trivy produced no report"
 
-BATCH=$(bash "$ADAPTER" --report "$REPORT" --certname "$CERT") || die "adapter normalization failed"
+BATCH=$(bash "$ADAPTER" --report "$REPORT" --certname "$CERT") || fail_json "adapter normalization failed"
 
 if [ -n "$TOKEN" ]; then
   printf '%s' "$BATCH" | curl -sf -X POST "$CONSOLE/api/v1/compliance/results" \
     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data-binary @- >/dev/null \
-    || die "POST to console failed"
+    || fail_json "POST to console failed"
 else
   printf '%s' "$BATCH" | curl -sf -X POST "$CONSOLE/api/v1/compliance/results" \
     -H 'Content-Type: application/json' --data-binary @- >/dev/null \
-    || die "POST to console failed"
+    || fail_json "POST to console failed"
 fi
 
 printf '{"status": "scanned", "scanner": "trivy", "certname": "%s"}\n' "$CERT"

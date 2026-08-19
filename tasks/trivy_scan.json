@@ -1,6 +1,6 @@
 {
   "description": "Scan a node's filesystem with Trivy and POST normalized compliance.v1 results to the console. Self-contained (bundles the trivy-report adapter). Installs Trivy when install=true.",
-  "input_method": "environment",
+  "input_method": "both",
   "files": ["trivy/files/trivy-report.sh"],
   "parameters": {
     "console_url": {
@@ -9,11 +9,12 @@
     },
     "ingest_token": {
       "description": "Bearer token for /api/v1/compliance/results (server-injected).",
-      "type": "Optional[String[1]]"
+      "type": "Optional[String[1]]",
+      "sensitive": true
     },
     "scan_path": {
-      "description": "Filesystem path to scan (trivy rootfs).",
-      "type": "String[1]",
+      "description": "Filesystem path to scan (trivy rootfs). Must not start with '-'.",
+      "type": "Pattern[/\\A[^-].*\\z/]",
       "default": "/"
     },
     "install": {
