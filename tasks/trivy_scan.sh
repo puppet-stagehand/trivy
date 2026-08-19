@@ -6,6 +6,13 @@ set -u
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# TRIVY_SCAN_PUPPET_BIN exists solely so tests can point the certname lookup
+# at a stub puppet binary on a curated PATH instead of the real
+# /opt/puppetlabs/bin/puppet (which may be genuinely installed on the
+# dev/test host, mirroring STAGEHAND_RECERT_PUPPET_BIN/STAGEHAND_DISCOVER_PUPPET_BIN's
+# established convention). It is NEVER a Bolt param.
+PUPPET_BIN="${TRIVY_SCAN_PUPPET_BIN:-/opt/puppetlabs/bin/puppet}"
+
 CONSOLE="${PT_console_url:-}"
 TOKEN="${PT_ingest_token:-}"
 SCAN_PATH="${PT_scan_path:-/}"
@@ -54,7 +61,7 @@ if ! command -v trivy >/dev/null 2>&1; then
   fi
 fi
 
-CERT=$(/opt/puppetlabs/bin/puppet config print certname 2>/dev/null || hostname -f 2>/dev/null || hostname)
+CERT=$("$PUPPET_BIN" config print certname 2>/dev/null || hostname -f 2>/dev/null || hostname)
 REPORT=$(mktemp) || die "mktemp failed"
 trap 'rm -f "$REPORT"' EXIT
 
