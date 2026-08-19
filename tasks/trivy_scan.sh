@@ -18,11 +18,37 @@ ADAPTER="${INSTALLDIR}/trivy/files/trivy-report.sh"
 [ -f "$ADAPTER" ] || die "trivy-report adapter not found at $ADAPTER"
 command -v jq >/dev/null 2>&1 || die "jq is required on the target for the trivy adapter"
 
+# Pinned release + checksum verification (FND-09 / CVE-2026-33634). This
+# replaces the previous unpinned install by piping the aquasecurity/trivy
+# repo's main-branch installer shell script into `sh`, which trusted whatever
+# the `main` branch (or a `latest` tag) currently contained -- exactly the
+# vector CVE-2026-33634 turned into a live supply-chain compromise via the
+# malicious v0.69.4/v0.69.5/v0.69.6 releases (GHSA-69fq-xp46-6x23). Re-verify
+# this pin (version + checksum) against
+# https://github.com/aquasecurity/trivy/releases before bumping it -- never
+# pin 0.69.4/0.69.5/0.69.6.
+TRIVY_VERSION="0.72.0"
+TRIVY_ASSET="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+TRIVY_BASE="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+
 if ! command -v trivy >/dev/null 2>&1; then
   if [ "$INSTALL" = "true" ]; then
-    printf '>>> installing trivy\n'
-    curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
-      | sh -s -- -b /usr/local/bin >/dev/null 2>&1 || die "trivy install failed"
+    printf '>>> installing trivy %s (checksum-verified)\n' "$TRIVY_VERSION"
+    TMPDIR=$(mktemp -d) || die "mktemp -d failed"
+
+    curl -sfL "$TRIVY_BASE/$TRIVY_ASSET" -o "$TMPDIR/$TRIVY_ASSET" \
+      || die "trivy download failed"
+    curl -sfL "$TRIVY_BASE/trivy_${TRIVY_VERSION}_checksums.txt" -o "$TMPDIR/checksums.txt" \
+      || die "trivy checksums.txt download failed"
+
+    EXPECTED=$(grep " $TRIVY_ASSET\$" "$TMPDIR/checksums.txt" | awk '{print $1}')
+    [ -n "$EXPECTED" ] || die "no checksum entry found for $TRIVY_ASSET in checksums.txt"
+    ACTUAL=$(sha256sum "$TMPDIR/$TRIVY_ASSET" | awk '{print $1}')
+    [ "$EXPECTED" = "$ACTUAL" ] || die "trivy checksum mismatch: expected $EXPECTED got $ACTUAL"
+
+    tar -xzf "$TMPDIR/$TRIVY_ASSET" -C "$TMPDIR" trivy || die "trivy tarball extraction failed"
+    install -m 0755 "$TMPDIR/trivy" /usr/local/bin/trivy || die "trivy install failed"
+    rm -rf "$TMPDIR"
   else
     die "trivy not installed (pass install=true to auto-install)"
   fi
