@@ -1,6 +1,6 @@
 # trivy — Trivy scanner integration for the Puppet Stagehand Console
 
-Forge: `souldonetworks-trivy`. Runs [Trivy](https://github.com/aquasecurity/trivy)
+Forge: `stagehand-trivy`. Runs [Trivy](https://github.com/aquasecurity/trivy)
 against a node's filesystem and POSTs normalized `compliance.v1` results to the
 Puppet Stagehand Console's ingest API.
 
