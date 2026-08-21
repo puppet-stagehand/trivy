@@ -1,0 +1,146 @@
+---
+# Real Puppet 9 validation for stagehand-trivy.
+#
+# Why this exists as a separate, gated workflow instead of just widening the
+# `puppet` matrix in ci.yml: Puppet 9 is real on Puppet's authenticated
+# package repos (apt-puppetcore.puppet.com / yum-puppetcore.puppet.com both
+# serve genuine puppet9 release packages), but:
+#   - there is NO puppet 9.x RubyGem (the `puppet` gem tops out at 8.10.0),
+#     so `bundle install`-based unit specs can never exercise puppet9 --
+#     only a real installed AGENT package can.
+#   - voxpupuli/gha-puppet's beaker.yml@v4 reusable workflow does not know
+#     "puppet9" as a beaker_collection value (its documented set is
+#     puppet7/puppet8/openvox7/openvox8/staging only), so it cannot drive
+#     this the way ci.yml drives puppet7/puppet8/openvox8.
+#   - installing the real puppet9 agent package requires HTTP Basic auth
+#     against Puppet's package repos (username `forge-key`, password a real
+#     Forge API token) -- a credentialed, real-infra operation that must
+#     never run un-gated on every PR from a fork.
+#
+# So this workflow provisions a container, installs the real puppet9 agent
+# from the authenticated repo (mirroring puppet-console's
+# register.sh.tmpl auth pattern: apt uses /etc/apt/auth.conf.d, yum uses
+# repo-file username=/password= lines), and runs this module's task-level
+# acceptance checks (metadata validation + tasks/trivy_scan_test.sh's shell
+# harness + a real `puppet task run`-shaped smoke check) against it.
+#
+# WIRED, NOT ARMED (same idiom as soup-os_patching's soup-acceptance.yml):
+# this workflow requires the repository variable PUPPET9_ACCEPTANCE_ARMED to
+# be exactly "true" AND a typed workflow_dispatch confirmation phrase before
+# any provisioning/install step runs. Both are unset/unarmed by default.
+# Puppet 9 is real but this org has not yet decided to run authenticated,
+# real-package-repo installs unattended in CI -- arming this is a deliberate,
+# reviewed decision, not a default.
+#
+# To arm: set repo variable PUPPET9_ACCEPTANCE_ARMED=true, ensure secret
+# FORGE_API_TOKEN is populated with a real Forge API key (already present on
+# this repo per the console-issued token), then run this workflow via
+# workflow_dispatch typing the exact confirmation phrase below.
+
+name: Puppet 9 Acceptance (Real Agent, Gated)
+
+# yamllint disable-line rule:truthy
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type EXACTLY "run puppet9 acceptance" to allow this run to install a real puppet9 agent from the authenticated Puppet package repos'
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: puppet9-acceptance-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Preflight (fail closed unless armed)
+    runs-on: ubuntu-latest
+    outputs:
+      armed: ${{ steps.gate.outputs.armed }}
+    steps:
+      - name: Gate on PUPPET9_ACCEPTANCE_ARMED and explicit confirmation
+        id: gate
+        env:
+          ARMED: ${{ vars.PUPPET9_ACCEPTANCE_ARMED }}
+          CONFIRM_INPUT: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "${ARMED:-}" != "true" ]; then
+            echo "::error::PUPPET9_ACCEPTANCE_ARMED is not 'true'. This gate is deliberately unarmed by default -- see this workflow's header comment."
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          if [ "${CONFIRM_INPUT:-}" != "run puppet9 acceptance" ]; then
+            echo "::error::workflow_dispatch confirmation phrase did not match."
+            echo "armed=false" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "armed=true" >> "$GITHUB_OUTPUT"
+
+  puppet9-container:
+    name: Install real puppet9 agent (${{ matrix.image }}) and run acceptance checks
+    needs: preflight
+    if: needs.preflight.outputs.armed == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: 'ubuntu:24.04'
+            pkg: apt
+          - image: 'rockylinux:9'
+            pkg: dnf
+    container:
+      image: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install real puppet9 agent from the Forge-key-authenticated puppetcore repo (apt)
+        if: matrix.pkg == 'apt'
+        env:
+          FORGE_API_TOKEN: ${{ secrets.FORGE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${FORGE_API_TOKEN:-}" || { echo "::error::secrets.FORGE_API_TOKEN is not set"; exit 1; }
+          apt-get update -qq && apt-get install -y -qq curl ca-certificates gnupg jq
+          . /etc/os-release
+          curl -fsSL -o /tmp/puppet9-release.deb \
+            "https://apt-puppetcore.puppet.com/public/puppet9-release-${VERSION_CODENAME}.deb"
+          dpkg -i /tmp/puppet9-release.deb
+          install -m 0600 /dev/null /etc/apt/auth.conf.d/apt-puppetcore-puppet.conf
+          {
+            echo "machine apt-puppetcore.puppet.com"
+            echo "login forge-key"
+            echo "password ${FORGE_API_TOKEN}"
+          } > /etc/apt/auth.conf.d/apt-puppetcore-puppet.conf
+          apt-get update -qq
+          apt-get install -y -qq puppet-agent
+          /opt/puppetlabs/bin/puppet --version
+
+      - name: Install real puppet9 agent from the Forge-key-authenticated puppetcore repo (yum/dnf)
+        if: matrix.pkg == 'dnf'
+        env:
+          FORGE_API_TOKEN: ${{ secrets.FORGE_API_TOKEN }}
+        run: |
+          set -euo pipefail
+          test -n "${FORGE_API_TOKEN:-}" || { echo "::error::secrets.FORGE_API_TOKEN is not set"; exit 1; }
+          dnf install -y -q curl jq
+          elv=$(rpm -E %{rhel})
+          rpm -Uvh "https://yum-puppetcore.puppet.com/public/puppet9-release-el-${elv}.noarch.rpm"
+          for repofile in /etc/yum.repos.d/puppet*.repo; do
+            [ -f "$repofile" ] || continue
+            grep -q '^username=' "$repofile" || printf 'username=forge-key\npassword=%s\n' "${FORGE_API_TOKEN}" >> "$repofile"
+          done
+          dnf install -y -q puppet-agent
+          /opt/puppetlabs/bin/puppet --version
+
+      - name: Run this module's task-level acceptance checks against the real puppet9 install
+        run: |
+          set -euo pipefail
+          command -v jq >/dev/null 2>&1 || { echo "::error::jq missing"; exit 1; }
+          jq empty tasks/trivy_scan.json
+          /opt/puppetlabs/bin/puppet task show trivy::trivy_scan
+          sh tasks/trivy_scan_test.sh
