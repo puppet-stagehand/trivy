@@ -1,0 +1,84 @@
+---
+# Security/malware scanning for THIS REPO'S OWN SOURCE (its Puppet/Ruby/shell
+# tooling) -- NOT to be confused with tasks/trivy_scan.sh, which is this
+# module's product: installing and running Trivy on Puppet-managed nodes.
+# This workflow scans puppet-stagehand/trivy's own working tree in CI.
+#
+# Two gates, both fail-closed on real findings:
+#   1. bundler-audit against Gemfile.lock -- known CVEs in this repo's own
+#      Ruby dependency set (voxpupuli-test, rspec-puppet, puppet, openvox, ...).
+#   2. Trivy filesystem scan (vuln + secret + misconfig) over the repo tree,
+#      using the exact same pinned v0.72.0 release + sha256 checksum
+#      verification as tasks/trivy_scan.sh (CVE-2026-33634 fix -- never
+#      diverge from that pin, and never curl|sh a "latest" installer here
+#      either).
+
+name: Security
+
+# yamllint disable-line rule:truthy
+on:
+  workflow_call: {}
+  pull_request: {}
+  push:
+    branches:
+      - main
+      - master
+  schedule:
+    # Catch newly-disclosed CVEs against pinned dependencies even with no
+    # code changes.
+    - cron: '17 6 * * 1'
+
+permissions:
+  contents: read
+
+env:
+  TRIVY_VERSION: '0.72.0'
+
+jobs:
+  bundler-audit:
+    name: bundler-audit (Gemfile.lock CVEs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+      - name: bundle exec bundle-audit check --update
+        run: bundle exec bundle-audit check --update
+
+  trivy-filesystem-scan:
+    name: Trivy filesystem scan (vuln + secret + misconfig)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install pinned, checksum-verified Trivy (mirrors tasks/trivy_scan.sh's CVE-2026-33634 fix)
+        run: |
+          set -euo pipefail
+          asset="trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz"
+          base="https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}"
+          tmp=$(mktemp -d)
+
+          curl -sfL "${base}/${asset}" -o "${tmp}/${asset}"
+          curl -sfL "${base}/trivy_${TRIVY_VERSION}_checksums.txt" -o "${tmp}/checksums.txt"
+
+          expected=$(grep " ${asset}\$" "${tmp}/checksums.txt" | awk '{print $1}')
+          [ -n "$expected" ] || { echo "::error::no checksum entry found for ${asset}"; exit 1; }
+          actual=$(sha256sum "${tmp}/${asset}" | awk '{print $1}')
+          [ "$expected" = "$actual" ] || { echo "::error::trivy checksum mismatch: expected $expected got $actual"; exit 1; }
+
+          tar -xzf "${tmp}/${asset}" -C "${tmp}" trivy
+          install -m 0755 "${tmp}/trivy" /usr/local/bin/trivy
+          rm -rf "${tmp}"
+          trivy --version
+
+      - name: Trivy filesystem scan (vuln + secret + misconfig, fail closed on HIGH/CRITICAL)
+        run: |
+          set -euo pipefail
+          trivy fs \
+            --scanners vuln,secret,misconfig \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --ignore-unfixed \
+            .
