@@ -1,0 +1,116 @@
+---
+name: CI
+
+# yamllint disable-line rule:truthy
+on:
+  pull_request: {}
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+    inputs:
+      beaker_staging_url:
+        description: |-
+          URL to a staging Server to test unreleased packages.
+          We will append the version to the Server and assume all packages are in the same directory.
+          Only supported for AIO packages.
+        required: false
+        type: string
+        default: 'https://artifacts.voxpupuli.org/openvox-agent'
+      beaker_collection:
+        description: |-
+          When set to staging, we will download the packages from staging_url.
+          Otherwise we will use the official repos. Supported values: puppet7, puppet8, openvox7, openvox8, staging.
+          When unset, we will generate a list of supported collections based on metadata.json.
+        required: false
+        type: string
+      beaker_staging_version:
+        description: |-
+          The package version we want to test.
+          Only used for beaker_collection = staging
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.ref_name }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  puppet:
+    name: ${{ matrix.collection }} dependency resolution
+    strategy:
+      fail-fast: false
+      matrix:
+        collection:
+          - puppet7
+          - puppet8
+          - openvox8
+    uses: voxpupuli/gha-puppet/.github/workflows/beaker.yml@v4
+    with:
+      beaker_staging_url: ${{ inputs.beaker_staging_url }}
+      beaker_collection: ${{ inputs.beaker_collection || matrix.collection }}
+      beaker_staging_version: ${{ inputs.beaker_staging_version }}
+
+  # openvox9 is real (apt/yum.voxpupuli.org's openvox9 repo, and the openvox
+  # RubyGem publishes pre-releases through 9.0.0.pre.beta2) but is beta-only
+  # upstream -- OpenVox's own 2026-07-15 announcement says not to recommend
+  # it for production. voxpupuli/gha-puppet's beaker.yml@v4 also does not
+  # know "openvox9" as a beaker_collection value at all (its documented set
+  # is puppet7/puppet8/openvox7/openvox8/staging only), so this job cannot
+  # use the shared reusable workflow the way the blocking matrix above does.
+  # It runs a best-effort local compile/spec check against the openvox gem's
+  # beta prerelease instead, and is explicitly non-blocking:
+  #   - continue-on-error: true, so a failure here never fails the CI check.
+  #   - not part of the `puppet` matrix above, so it can't affect branch
+  #     protection status checks keyed to that job name.
+  #
+  # EMPIRICALLY VERIFIED (2026-08-21): this job is expected to fail its
+  # `bundle install` step today, for a structural reason that goes beyond
+  # "it's beta". `bundle lock --update openvox` against any openvox
+  # >= 8.24.0 (which covers every 9.x prerelease through 9.0.0.pre.beta2)
+  # always fails dependency resolution with:
+  #   openvox >= 8.24.0 depends on puppet-resource_api ~> 2.0, and
+  #   puppet_litmus >= 2.4.0 (via bolt >= 2.36.0) depends on puppet
+  #   >= 6.18.0, which depends on puppet-resource_api ~> 1.5.
+  # openvox's puppet-resource_api 2.x requirement is incompatible with this
+  # Gemfile's puppet_litmus/bolt dependency chain, which pulls the `puppet`
+  # gem (resource_api ~> 1.5) in regardless of whether `puppet` is also
+  # explicitly pinned -- `bundle config set --without system_tests` does
+  # NOT dodge this either, since `bundle lock` resolves every group's
+  # dependency graph up front regardless of --without.
+  # This is tracking-only until either openvox9 goes GA and gha-puppet adds
+  # native support for it, or puppet_litmus/bolt ship a puppet-resource_api
+  # 2.x-compatible release -- whichever lands first.
+  openvox9-beta:
+    name: openvox9 (beta, best-effort, non-blocking)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: false
+      - name: bundle install against the openvox 9.x beta prerelease gem
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile
+          OPENVOX_GEM_VERSION: '>= 9.0.0.pre.beta1'
+        run: |
+          set -euo pipefail
+          gem install bundler --no-document
+          bundle config set --local path 'vendor/bundle'
+          bundle lock --update openvox || true
+          bundle install
+      - name: bundle exec rake spec (informational only -- see job comment)
+        env:
+          BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile
+          OPENVOX_GEM_VERSION: '>= 9.0.0.pre.beta1'
+        run: bundle exec rake spec
+
+  security:
+    name: Repo security scan (bundler-audit + Trivy filesystem)
+    uses: ./.github/workflows/security.yml
