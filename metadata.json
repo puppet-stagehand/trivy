@@ -2,7 +2,7 @@
   "name": "stagehand-trivy",
   "version": "0.1.0",
   "author": "stagehand",
-  "summary": "Run Trivy and POST normalized compliance.v1 results to the Puppet Stagehand Console. Reference scanner integration — any scanner that speaks compliance.v1 to the same ingest endpoint is a valid substitute.",
+  "summary": "Run Trivy and POST normalized compliance.v1 results to the Puppet Stagehand Console. Any compliance.v1-speaking scanner is a valid substitute.",
   "license": "Apache-2.0",
   "source": "https://github.com/puppet-stagehand/trivy",
   "project_page": "https://github.com/puppet-stagehand/trivy",
