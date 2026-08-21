@@ -16,7 +16,8 @@
     { "operatingsystem": "AlmaLinux", "operatingsystemrelease": ["8", "9"] }
   ],
   "requirements": [
-    { "name": "puppet", "version_requirement": ">= 8.0.0 < 9.0.0" }
+    { "name": "puppet", "version_requirement": ">= 7.0.0 < 9.0.0" },
+    { "name": "openvox", "version_requirement": ">= 8.0.0 < 10.0.0" }
   ],
   "tags": ["puppet-core", "console", "compliance", "trivy", "bolt"]
 }
