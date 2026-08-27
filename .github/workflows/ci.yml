@@ -1,4 +1,29 @@
 ---
+# STAGEHAND-OWNED, NOT MODULESYNC-MANAGED. The `puppet` dependency-
+# resolution matrix and `openvox9-beta` job below are this file's
+# original modulesync-generated content (kept, not replaced -- D-02
+# preserves target evolution, and openvox9-beta's bundle-based repro of a
+# real puppet-resource_api version conflict is trivy-specific, more
+# precise than a generic reusable-workflow leg, and stays as-is). The
+# `security`, `lint`, `unit-test`, `acceptance`, `task-tests`,
+# `pdk-build-and-package`, and `reference-drift` jobs were added here to
+# normalize this file to the same blocking-fan-in shape
+# puppet-stagehand/stagehand (04.1-02) and puppet-stagehand/patchbot
+# (04.1-03) already proved, adapted for trivy's task-only (no
+# manifests/classes) shape (04.1-04-PLAN.md Task 2, D-16). A future
+# modulesync run would revert the dependency-resolution/openvox9-beta
+# jobs to their stock shape -- if that happens, re-apply this
+# normalization the same way puppet9-acceptance.yml/security.yml's own
+# headers already document for their pieces.
+#
+# Blocking vs experimental, per D-16: puppet7/puppet8/openvox8 are the
+# real, GA collections this module declares support for (metadata.json
+# requirements: puppet >= 7.0.0 < 9.0.0, openvox >= 8.0.0 < 10.0.0) and
+# block the PR. puppet9 has no puppet gem yet (rubygems.org tops out at
+# 8.10.0); openvox9 exists only as a beta prerelease. Both remain
+# explicitly named, non-blocking, best-effort legs until a stable
+# toolchain exists -- never silently folded into the required matrix, and
+# never silently dropped either.
 name: CI
 
 # yamllint disable-line rule:truthy
@@ -40,6 +65,185 @@ permissions:
   contents: read
 
 jobs:
+  security:
+    name: Repo security scan (bundler-audit + Trivy filesystem)
+    uses: ./.github/workflows/security.yml
+
+  lint:
+    name: Lint / validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - name: puppet-lint + syntax + metadata-json-lint
+        run: bundle exec rake validate lint metadata_lint
+
+  unit-test:
+    name: rspec (${{ matrix.label }})
+    needs: lint
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Real, resolvable releases -- these block the PR.
+          - label: "Puppet Core 7"
+            gem_name: puppet
+            gem_version: "~> 7.0"
+            ruby_version: "3.2"
+            experimental: false
+          - label: "Puppet Core 8"
+            gem_name: puppet
+            gem_version: "~> 8.0"
+            ruby_version: "3.2"
+            experimental: false
+          - label: "OpenVox 8"
+            gem_name: openvox
+            gem_version: "~> 8.0"
+            ruby_version: "3.2"
+            experimental: false
+          # Puppet 9 has not shipped on RubyGems yet -- real leg, wired in,
+          # can only start passing once Puppet 9 actually ships (see this
+          # file's header and puppet9-acceptance.yml for the real-package
+          # compile-check path).
+          - label: "Puppet Core 9 (experimental -- not yet released)"
+            gem_name: puppet
+            gem_version: "~> 9.0"
+            ruby_version: "3.2"
+            experimental: true
+          # OpenVox 9 exists only as a pre-release -- forward-compat
+          # signal, not a support commitment.
+          - label: "OpenVox 9 (experimental -- pre-release)"
+            gem_name: openvox
+            gem_version: ">= 9.0.0.beta1"
+            ruby_version: "3.2"
+            experimental: true
+    continue-on-error: ${{ matrix.experimental }}
+    env:
+      CI_PUPPET_GEM_NAME: ${{ matrix.gem_name }}
+      CI_PUPPET_GEM_VERSION: ${{ matrix.gem_version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: ${{ matrix.ruby_version }}
+
+      - name: bundle install (fresh per matrix leg)
+        # Each leg resolves its own gem graph for CI_PUPPET_GEM_NAME/
+        # VERSION -- the committed local Gemfile.lock (gitignored, dev-
+        # machine only) is never touched here.
+        run: |
+          rm -f Gemfile.lock
+          bundle install --jobs 4 --retry 3
+
+      - name: rspec (task/adapter unit contracts -- this module has no manifests to compile)
+        # This module is Bolt-task-only (no classes/defines), so there is
+        # no Puppet catalog to compile per Puppet-version leg -- spec/unit
+        # covers task metadata/behavior contracts and the trivy-report.sh
+        # adapter directly. spec/acceptance is covered by its own job
+        # below since it exercises a real subprocess and does not need to
+        # run once per Puppet-version leg.
+        run: |
+          bundle exec rake fixtures:prep
+          bundle exec rspec spec/unit
+
+  acceptance:
+    name: Acceptance (target-native, real subprocess)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - name: rspec (spec/acceptance -- real trivy_scan.sh subprocess, real jq, stubbed trivy/curl/puppet)
+        run: bundle exec rspec spec/acceptance
+
+  task-tests:
+    name: Bolt task shell tests
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Run tasks/*_test.sh and tests/*.sh
+        run: |
+          set -eu
+          status=0
+          for t in tasks/*_test.sh tests/*.sh; do
+            [ -f "$t" ] || continue
+            echo "== $t =="
+            sh "$t" || status=1
+          done
+          exit "$status"
+
+  # FORGE-01: `pdk build` packages metadata.json + the module's declared
+  # files into an installable tarball independent of `pdk validate`'s
+  # compatibility gate. `pdk validate` is NOT wired in here -- it
+  # unconditionally fails with "This module is not PDK compatible" against
+  # this repo's voxpupuli/modulesync toolchain (Gemfile/Rakefile), and
+  # `pdk convert --force` destroys that working toolchain (same
+  # documented, shared gap as puppet-stagehand/stagehand and
+  # puppet-stagehand/patchbot -- see 04.1-03-SUMMARY.md and
+  # 04.1-04-SUMMARY.md). Inspects the resulting tarball's name/version/
+  # file manifest so a malformed or incomplete package fails CI instead
+  # of only surfacing at publish time.
+  pdk-build-and-package:
+    name: PDK build + package inspection (FORGE-01)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: pdk build
+        run: pdk build --force
+
+      - name: Inspect built package (name, version, expected file manifest)
+        run: |
+          set -eu
+          name=$(jq -r '.name' metadata.json)
+          version=$(jq -r '.version' metadata.json)
+          pkg="pkg/${name}-${version}.tar.gz"
+          [ -f "$pkg" ] || { echo "::error::expected package not found: $pkg"; exit 1; }
+          echo ">>> package: $pkg"
+          sha256sum "$pkg"
+          echo ">>> manifest:"
+          tar tzf "$pkg" | sed -n '1,50p'
+          tar tzf "$pkg" | grep -q "${name}-${version}/metadata.json" \
+            || { echo "::error::package is missing metadata.json at its expected path"; exit 1; }
+          tar tzf "$pkg" | grep -q "${name}-${version}/tasks/trivy_scan.json" \
+            || { echo "::error::package is missing tasks/trivy_scan.json"; exit 1; }
+          tar tzf "$pkg" | grep -q "${name}-${version}/files/trivy-report.sh" \
+            || { echo "::error::package is missing files/trivy-report.sh"; exit 1; }
+
+  # POLISH-03: REFERENCE.md must be generated, committed, and never allowed
+  # to silently drift from the manifests/tasks it documents.
+  reference-drift:
+    name: REFERENCE.md drift gate (POLISH-03)
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
+        with:
+          ruby-version: "3.2"
+          bundler-cache: true
+
+      - name: Regenerate REFERENCE.md and fail on drift
+        run: |
+          bundle exec puppet strings generate --format markdown
+          git diff --exit-code -- REFERENCE.md
+
   puppet:
     name: ${{ matrix.collection }} dependency resolution
     strategy:
@@ -90,8 +294,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: '3.2'
           bundler-cache: false
@@ -110,7 +314,3 @@ jobs:
           BUNDLE_GEMFILE: ${{ github.workspace }}/Gemfile
           OPENVOX_GEM_VERSION: '>= 9.0.0.pre.beta1'
         run: bundle exec rake spec
-
-  security:
-    name: Repo security scan (bundler-audit + Trivy filesystem)
-    uses: ./.github/workflows/security.yml

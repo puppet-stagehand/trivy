@@ -39,8 +39,8 @@ jobs:
     name: bundler-audit (Gemfile.lock CVEs)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: ruby/setup-ruby@v1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: ruby/setup-ruby@95ef2b042f9d7a56d8268cba8559e2842e2ad01b # v1
         with:
           ruby-version: '3.2'
           bundler-cache: true
@@ -51,7 +51,7 @@ jobs:
     name: Trivy filesystem scan (vuln + secret + misconfig)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Install pinned, checksum-verified Trivy (mirrors tasks/trivy_scan.sh's CVE-2026-33634 fix)
         run: |

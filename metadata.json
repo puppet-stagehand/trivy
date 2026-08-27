@@ -1,6 +1,6 @@
 {
   "name": "stagehand-trivy",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": "stagehand",
   "summary": "Run Trivy and POST normalized compliance.v1 results to the Puppet Stagehand Console. Any compliance.v1-speaking scanner is a valid substitute.",
   "license": "Apache-2.0",
