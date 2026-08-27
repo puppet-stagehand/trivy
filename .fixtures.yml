@@ -1,4 +1,2 @@
 ---
-fixtures:
-  symlinks:
-    trivy: "#{source_dir}"
+fixtures: {}

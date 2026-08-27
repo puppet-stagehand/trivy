@@ -84,7 +84,7 @@ cat > "$SHIMDIR/puppet-stub" <<SHIM
 #!/bin/sh
 printf 'puppet %s\n' "\$*" >> "$ARGV_LOG"
 case "\$*" in
-  *"config print certname"*) printf 'test-node.example.com\n'; exit 0 ;;
+  *"config print certname"*) printf '%s\n' "\${SHIM_CERTNAME:-test-node.example.com}"; exit 0 ;;
   *) exit 1 ;;
 esac
 SHIM
@@ -188,6 +188,7 @@ run_trivy_scan() {
     SHIM_TRIVY_WRITE_REPORT="${SHIM_TRIVY_WRITE_REPORT:-0}" \
     SHIM_CURL_DOWNLOAD_SUCCEED="${SHIM_CURL_DOWNLOAD_SUCCEED:-1}" \
     SHIM_CURL_POST_SUCCEED="${SHIM_CURL_POST_SUCCEED:-1}" \
+    SHIM_CERTNAME="${SHIM_CERTNAME:-test-node.example.com}" \
     sh "$TARGET_SH"
 }
 
@@ -197,6 +198,7 @@ reset() {
   SHIM_TRIVY_WRITE_REPORT=0
   SHIM_CURL_DOWNLOAD_SUCCEED=1
   SHIM_CURL_POST_SUCCEED=1
+  SHIM_CERTNAME='test-node.example.com'
 }
 
 # --- Case 1: PT_scan_path = "-x" -> die()/exit 1, trivy stub NEVER invoked. ---
@@ -323,6 +325,18 @@ esac
 INPUT_METHOD8=$(jq -r '.input_method' "$TARGET_JSON")
 [ "$INPUT_METHOD8" = "both" ] || fail "case 8 (schema): expected input_method == 'both', got: $INPUT_METHOD8"
 info "case 8 (schema): OK (ingest_token sensitive, scan_path Pattern-typed, input_method both)"
+
+# --- Case 9: JSON-special certname remains valid and round-trips exactly. ---
+reset
+make_trivy_stub
+SHIM_TRIVY_WRITE_REPORT=1
+SHIM_CERTNAME=$(printf 'node"name\nwith-tab\tand-backslash\\tail')
+OUT=$(run_trivy_scan '' false)
+CERT9=$(printf '%s' "$OUT" | jq -er '.certname' 2>/dev/null) \
+  || fail "case 9 (JSON-special certname): output is not valid success JSON: $OUT"
+[ "$CERT9" = "$SHIM_CERTNAME" ] \
+  || fail "case 9 (JSON-special certname): certname did not round-trip exactly"
+info "case 9 (JSON-special certname): OK (valid JSON, value round-trips)"
 
 info "all trivy_scan safety cases PASSED"
 exit 0

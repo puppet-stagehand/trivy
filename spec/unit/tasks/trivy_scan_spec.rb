@@ -50,10 +50,11 @@ RSpec.describe 'the trivy::trivy_scan task' do
     expect(source).to match(%r{if\s+\[\s*"\$INSTALL"\s*=\s*"true"\s*\]})
   end
 
-  it 'embeds business-logic failures as {"status":"error",...} JSON on stdout with exit 0 (not a bare non-zero exit)' do
-    fail_json_line = source.lines.find { |l| l.include?('fail_json()') }
-    expect(fail_json_line).not_to be_nil
-    expect(fail_json_line).to include('"status": "error"').and include('"scanner": "trivy"').and include('exit 0')
+  it 'embeds business-logic failures as {"status":"error",...} JSON on stdout with exit 0 (not a bare non-zero exit), safely encoded via jq' do
+    fail_json_body = source[%r{^fail_json\(\)\s*\{.*?^\}}m]
+    expect(fail_json_body).not_to be_nil
+    expect(fail_json_body).to include('status: "error"').and include('scanner: "trivy"').and include('exit 0')
+    expect(fail_json_body).to match(%r{jq\s+-cn\s+--arg\s+error\s+"\$\*"}), 'expected fail_json to use jq -cn --arg (safe encoding), not hand-rolled printf/string interpolation'
   end
 
   it 'requires console_url and dies (setup failure, non-zero exit) when it is missing' do

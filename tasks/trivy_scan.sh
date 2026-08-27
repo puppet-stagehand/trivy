@@ -16,7 +16,10 @@ die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 # contract (AUDIT-04, matching install_ansible.sh/discover.sh/patch.sh) on
 # stdout and exits 0, so the console/orchestrator can always parse the
 # outcome instead of an opaque stderr blob and a bare non-zero exit.
-fail_json() { printf '{"status": "error", "error": "%s", "scanner": "trivy"}\n' "$*"; exit 0; }
+fail_json() {
+  jq -cn --arg error "$*" '{status: "error", error: $error, scanner: "trivy"}'
+  exit 0
+}
 
 # TRIVY_SCAN_PUPPET_BIN exists solely so tests can point the certname lookup
 # at a stub puppet binary on a curated PATH instead of the real
@@ -108,4 +111,4 @@ else
     || fail_json "POST to console failed"
 fi
 
-printf '{"status": "scanned", "scanner": "trivy", "certname": "%s"}\n' "$CERT"
+jq -cn --arg certname "$CERT" '{status: "scanned", scanner: "trivy", certname: $certname}'
