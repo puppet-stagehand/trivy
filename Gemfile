@@ -8,11 +8,28 @@
 source ENV['GEM_SOURCE'] || 'https://rubygems.org'
 
 group :test do
-  gem 'voxpupuli-test', '~> 14.0',  :require => false
   gem 'puppet_metadata', '~> 6.1',  :require => false
   gem 'json_schemer', '~> 2.3',     :require => false
   gem 'bundler-audit', '~> 0.9',    :require => false
 end
+
+# voxpupuli-test is declared outside any single `group do` block, with an
+# explicit :groups => [:test, :system_tests], so its group membership is
+# unambiguous (a gem call's own :groups option sets its groups outright; it
+# does not merge with an enclosing `group do` block). It needs to survive
+# BOTH bundle-exclusion shapes the reusable voxpupuli/gha-puppet
+# beaker.yml@v4 workflow uses (wired in via ci.yml's `puppet:` job):
+# setup_matrix/unit run with BUNDLE_WITHOUT=development:system_tests:release
+# (excludes :system_tests, keeps :test), while acceptance runs with
+# BUNDLE_WITHOUT=development:test:release (excludes :test, keeps
+# :system_tests). Bundler only excludes a gem if ALL of its groups are
+# excluded, so a single-group placement is guaranteed to vanish under one of
+# those two combinations. spec/spec_helper.rb unconditionally requires
+# 'voxpupuli/test/spec_helper', and every spec/acceptance/*_spec.rb requires
+# spec_helper, so the acceptance leg's `bundle exec rake beaker` (which runs
+# spec/acceptance via rspec) needs voxpupuli-test present too, not just
+# :test-group consumers like `rake validate lint`.
+gem 'voxpupuli-test', '~> 14.0', :require => false, :groups => [:test, :system_tests]
 
 group :development do
   gem 'guard-rake',               :require => false
