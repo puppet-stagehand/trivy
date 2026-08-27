@@ -103,7 +103,7 @@ RSpec.describe 'trivy::trivy_scan (POSIX, target-native acceptance)' do
   end
 
   it 'runs the real trivy_scan.sh subprocess end-to-end and emits parseable success JSON' do
-    real_jq_dir = File.dirname(`command -v jq`.strip)
+    real_jq_dir = File.dirname(`which jq`.strip)
     stubs = with_stubs(@work_dir, trivy_writes_report: true, curl_post_succeeds: true)
 
     stdout, stderr, status = run_task(
@@ -123,7 +123,7 @@ RSpec.describe 'trivy::trivy_scan (POSIX, target-native acceptance)' do
   end
 
   it 'runs the real trivy_scan.sh subprocess end-to-end and emits parseable error JSON when the console POST fails' do
-    real_jq_dir = File.dirname(`command -v jq`.strip)
+    real_jq_dir = File.dirname(`which jq`.strip)
     stubs = with_stubs(@work_dir, trivy_writes_report: true, curl_post_succeeds: false)
 
     stdout, stderr, status = run_task(
@@ -147,7 +147,7 @@ RSpec.describe 'trivy::trivy_scan (POSIX, target-native acceptance)' do
   end
 
   it 'rejects an argument-injection scan_path before ever invoking trivy' do
-    real_jq_dir = File.dirname(`command -v jq`.strip)
+    real_jq_dir = File.dirname(`which jq`.strip)
     stubs = with_stubs(@work_dir, trivy_writes_report: true, curl_post_succeeds: true)
 
     stdout, stderr, status = run_task(
